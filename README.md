@@ -17,34 +17,32 @@ analytics with Looker.
 platform.
 
 ## Repository Structure
-**TODO**
+**TODO**: The diagram below will be updated as the code base is built out.
 
 ```
 ├── .github/
 │   └── workflows/
+│       ├── deploy-application.yml # Deploy application
 │       └── ruff.yml  # Ruff check configuration
 ├── app/  # Application
-│   ├── 
-│   │   ├── 
-│   │   |    ├── 
-│   │   |    └── 
-│   │   ├── 
-│   │   |   ├── 
-│   │   |   |   ├── 
-│   │   |   |   └── 
-│   │   |   └── 
-│   │   |       ├── 
-│   │   |       └── 
-│   │   └── 
-│   ├── 
+│   ├── api/
+│   │   └── routes/
+│   │       ├──
+│   │       └──
+│   ├── core/
 │   │   ├── 
 │   │   └── 
-│   ├── 
+│   ├── models
 │   │   ├── 
 │   │   ├── 
 │   │   ├── 
 │   │   └── 
-│   └── 
+│   ├── services/
+│   │   ├── 
+│   │   ├── 
+│   │   ├── 
+│   │   └── 
+│   └── app.py
 ├── experiments/  # Experiments
 │   └── 
 ├── .env.example  # Example environment file

@@ -1,0 +1,89 @@
+[tool.poetry]
+name = "ai-ml-thrasio-mvp"
+version = "0.1.0"
+description = ""
+authors = ["None"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.13"
+fastapi = "^0.100.0"
+uvicorn = "^0.22.0"
+jupyter = "^1.1.1"
+numpy = "^2.2.0"
+opencv-python-headless = "^4.10.0.84"
+matplotlib = "^3.10.0"
+pandas = "^2.2.3"
+google-cloud-aiplatform = "1.71.1"
+pillow = "^11.0.0"
+pycocotools = "^2.0.8"
+pydantic = "^2.10.4"
+pydantic-settings = "^2.7.0"
+python-dotenv = "^1.0.1"
+instructor = "^1.7.0"
+vertexai = "1.71.1"
+jsonref = "^1.1.0"
+flask = "^3.1.0"
+requests = "^2.32.3"
+opencv-python = "^4.11.0.86"
+
+[tool.poetry.group.test.dependencies]
+pytest = "^7.3.1"
+pytest-cov = "^4.1.0"
+
+[tool.poetry.scripts]
+test = "pytest"
+
+[tool.pytest.ini_options]
+pythonpath = [
+  "./app",
+  "./evaluations"
+]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.1.0"
+ipykernel = "^6.29.5"
+streamlit = "^1.41.1"
+
+[tool.ruff]
+target-version = "py39"
+line-length = 88
+
+# Enable pycodestyle ('E'), Pyflakes ('F'), and import sorting ('I') and docstring checking ('D')
+lint.select = ["E", "F", "I"]
+lint.ignore = []
+
+# Allow autofix for all enabled rules (when `--fix`) is provided.
+lint.fixable = ["A", "B", "C", "D", "E", "F", "G", "I", "N", "Q", "S", "T", "W", "ANN", "ARG", "BLE", "COM", "DJ", "DTZ", "EM", "ERA", "EXE", "FBT", "ICN", "INP", "ISC", "NPY", "PD", "PGH", "PIE", "PL", "PT", "PTH", "PYI", "RET", "RSE", "RUF", "SIM", "SLF", "TCH", "TID", "TRY", "UP", "YTT"]
+lint.unfixable = []
+
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".hg",
+    ".ipynb",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+    "experiments"
+]
