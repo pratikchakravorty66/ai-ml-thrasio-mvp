@@ -1,1 +1,1 @@
-"""AI/ML Thrasio MVP application package.""" 
+"""AI/ML Thrasio MVP application package."""

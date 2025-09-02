@@ -1,1 +1,1 @@
-"""Test package for AI/ML Thrasio MVP.""" 
+"""Test package for AI/ML Thrasio MVP."""
