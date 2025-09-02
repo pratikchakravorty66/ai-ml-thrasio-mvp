@@ -7,6 +7,26 @@ from pathlib import Path
 from google.cloud import aiplatform
 
 
+def compile_pipeline(output_path: str = "pipeline.json"):
+    """Compile the pipeline definition."""
+    # Add current directory to Python path for imports
+    current_dir = Path(__file__).parent.parent
+    sys.path.insert(0, str(current_dir))
+
+    try:
+        from kfp import compiler
+
+        from app.pipeline import thrasio_ml_pipeline
+
+        compiler.Compiler().compile(
+            pipeline_func=thrasio_ml_pipeline, package_path=output_path
+        )
+        print(f"Pipeline compiled to {output_path}")
+    except ImportError as e:
+        print(f"Import error: {e}")
+        raise
+
+
 def main():
     """Main deployment script for CI/CD."""
 
@@ -21,9 +41,6 @@ def main():
     print(f"Deploying pipeline to project: {project_id}, region: {region}")
 
     try:
-        # Import compile_pipeline function
-        from app.pipeline import compile_pipeline
-
         # Compile pipeline
         pipeline_path = "pipeline.json"
         compile_pipeline(pipeline_path)
