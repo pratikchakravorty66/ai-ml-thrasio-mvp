@@ -149,14 +149,7 @@ jobs:
         
     - name: Deploy to Vertex AI Pipelines
       run: |
-        poetry run python -c "
-        from app.pipeline import deploy_pipeline
-        import os
-        deploy_pipeline(
-            project_id='${{ secrets.GCP_PROJECT_ID }}',
-            region='${{ secrets.GCP_REGION }}',
-            pipeline_definition_path='pipeline.json'
-        )
-        "
+        poetry run python app/deploy.py
       env:
-        GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+        GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        GCP_REGION: ${{ secrets.GCP_REGION }}

@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-from app.pipeline import compile_pipeline, deploy_pipeline
+from app.pipeline import compile_pipeline
 
 
 def main():
@@ -30,12 +30,23 @@ def main():
             print(f"Error: Pipeline file {pipeline_path} not found")
             sys.exit(1)
 
-        # Deploy to Vertex AI
-        pipeline_resource = deploy_pipeline(
-            project_id=project_id, region=region, pipeline_definition_path=pipeline_path
-        )
+        # Initialize Vertex AI with authenticated session
+        from google.cloud import aiplatform
+        aiplatform.init(project=project_id, location=region)
 
-        print(f"✅ Pipeline deployed successfully: {pipeline_resource}")
+        # Deploy to Vertex AI using authenticated session
+        job = aiplatform.PipelineJob(
+            display_name="thrasio-ml-pipeline",
+            template_path=pipeline_path,
+            parameter_values={
+                "project_id": project_id,
+                "region": region,
+                "input_dataset": "thrasio_production_data"
+            }
+        )
+        
+        job.submit()
+        print(f"✅ Pipeline deployed successfully: {job.resource_name}")
 
     except Exception as e:
         print(f"❌ Deployment failed: {str(e)}")
