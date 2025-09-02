@@ -91,6 +91,7 @@ jobs:
         
     - name: Compile Vertex AI Pipeline
       run: |
+        export PYTHONPATH=$PYTHONPATH:.
         poetry run python app/pipeline.py
         
     - name: Upload pipeline artifact
@@ -149,6 +150,7 @@ jobs:
         
     - name: Deploy to Vertex AI Pipelines
       run: |
+        export PYTHONPATH=$PYTHONPATH:.
         poetry run python app/deploy.py
       env:
         GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
