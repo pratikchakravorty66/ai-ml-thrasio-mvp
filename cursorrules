@@ -1,0 +1,49 @@
+# Cursor Rules for tesseract-backend-ml
+# Software Engineering and AI Project Rules
+
+## Core Design Principles
+
+### Single Responsibility & Separation of Concerns
+Every module or class does one thing and one thing only, keeping related behavior self‑contained.
+
+### Open/Closed & Extension without Modification
+Build on abstractions so you can add new features via inheritance or composition, not by changing tested code.
+
+### Liskov Substitution & Interface Segregation
+Design small, focused interfaces and ensure subtypes behave identically to their base types.
+
+### Dependency Inversion & Low Coupling
+Depend on abstractions (interfaces) rather than concrete classes to minimize inter‑module ripple effects.
+
+### High Cohesion & Encapsulation
+Group closely related data and behavior, exposing only what's necessary and hiding implementation details.
+
+### DRY, KISS & YAGNI
+Avoid duplication, favor simple designs, and implement features only when they're actually needed.
+
+### Testability & CI
+Inject dependencies for easy mocking, keep side effects controlled, and integrate changes continuously with automated tests.
+
+### Continuous Refactoring
+Regularly revisit and refine code structure to maintain clarity, simplicity, and adaptability.
+
+## Project Guidelines
+
+- No scope creep
+- Think critically and independently before suggesting refactorings, rather than just being an agreeable agent
+- If you are unsure about an answer then please be humble enough to go through the official content present in the web
+
+## Development Environment
+
+- Use .venv as the Python virtual environment
+- Activate the virtual environment before running commands such as tests
+- Manual command execution preferred - provide commands to copy and paste rather than executing automatically
+
+## Project Focus
+
+This is a Tesseract backend ML project with focus on:
+- PDF processing and OCR
+- Label Studio integration
+- Google Cloud Storage integration
+- Document type processing (bank statements, pay stubs, allotment proofs, split direct deposit proofs)
+- Asynchronous processing with proper error handling and retries 

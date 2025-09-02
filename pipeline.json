@@ -1,0 +1,297 @@
+{
+  "components": {
+    "comp-data-preprocessing-component": {
+      "executorLabel": "exec-data-preprocessing-component",
+      "inputDefinitions": {
+        "parameters": {
+          "input_dataset": {
+            "parameterType": "STRING"
+          },
+          "project_id": {
+            "parameterType": "STRING"
+          },
+          "region": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "metadata": {
+            "parameterType": "STRUCT"
+          },
+          "processed_data_path": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-model-evaluation-component": {
+      "executorLabel": "exec-model-evaluation-component",
+      "inputDefinitions": {
+        "parameters": {
+          "model_path": {
+            "parameterType": "STRING"
+          },
+          "test_data_path": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "deploy_decision": {
+            "parameterType": "BOOLEAN"
+          },
+          "evaluation_metrics": {
+            "parameterType": "STRUCT"
+          }
+        }
+      }
+    },
+    "comp-model-training-component": {
+      "executorLabel": "exec-model-training-component",
+      "inputDefinitions": {
+        "parameters": {
+          "model_config": {
+            "parameterType": "STRUCT"
+          },
+          "processed_data_path": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "metrics": {
+            "parameterType": "STRUCT"
+          },
+          "model_path": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    }
+  },
+  "deploymentSpec": {
+    "executors": {
+      "exec-data-preprocessing-component": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "data_preprocessing_component"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform' 'pandas' 'numpy' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef data_preprocessing_component(\n    project_id: str,\n    region: str,\n    input_dataset: str\n) -> NamedTuple(\"Outputs\", [(\"processed_data_path\", str), (\"metadata\", dict)]):\n    \"\"\"Preprocess data for ML training.\"\"\"\n    from collections import namedtuple\n\n    # Placeholder preprocessing logic\n    print(f\"Processing dataset: {input_dataset}\")\n\n    # In a real implementation, this would:\n    # - Load data from BigQuery or GCS\n    # - Clean and transform data\n    # - Store processed data back to GCS\n\n    processed_path = f\"gs://{project_id}-ml-data/processed/data.parquet\"\n    metadata = {\n        \"rows_processed\": 1000,\n        \"features_created\": 50,\n        \"processing_timestamp\": \"2024-01-01T00:00:00Z\"\n    }\n\n    Outputs = namedtuple(\"Outputs\", [\"processed_data_path\", \"metadata\"])\n    return Outputs(processed_path, metadata)\n\n"
+          ],
+          "image": "python:3.11-slim"
+        }
+      },
+      "exec-model-evaluation-component": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "model_evaluation_component"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef model_evaluation_component(\n    model_path: str,\n    test_data_path: str\n) -> NamedTuple(\"Outputs\", [(\"evaluation_metrics\", dict), (\"deploy_decision\", bool)]):\n    \"\"\"Evaluate trained model and decide on deployment.\"\"\"\n    from collections import namedtuple\n\n    print(f\"Evaluating model: {model_path}\")\n    print(f\"Test data: {test_data_path}\")\n\n    # In a real implementation, this would:\n    # - Load the trained model\n    # - Run evaluation on test dataset\n    # - Compare against baseline metrics\n    # - Make deployment decision\n\n    evaluation_metrics = {\n        \"test_accuracy\": 0.94,\n        \"test_precision\": 0.92,\n        \"test_recall\": 0.91,\n        \"baseline_comparison\": \"improved\"\n    }\n\n    # Deploy if accuracy > 0.9\n    deploy_decision = evaluation_metrics[\"test_accuracy\"] > 0.9\n\n    Outputs = namedtuple(\"Outputs\", [\"evaluation_metrics\", \"deploy_decision\"])\n    return Outputs(evaluation_metrics, deploy_decision)\n\n"
+          ],
+          "image": "python:3.11-slim"
+        }
+      },
+      "exec-model-training-component": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "model_training_component"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform' 'scikit-learn' 'pandas' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef model_training_component(\n    processed_data_path: str,\n    model_config: dict\n) -> NamedTuple(\"Outputs\", [(\"model_path\", str), (\"metrics\", dict)]):\n    \"\"\"Train ML model.\"\"\"\n    from collections import namedtuple\n\n    print(f\"Training model with data from: {processed_data_path}\")\n    print(f\"Model config: {model_config}\")\n\n    # In a real implementation, this would:\n    # - Load processed data\n    # - Train the model\n    # - Save model artifacts to GCS\n    # - Return model metrics\n\n    model_path = f\"gs://models/trained_model_{model_config.get('version', 'v1')}\"\n    metrics = {\n        \"accuracy\": 0.95,\n        \"precision\": 0.93,\n        \"recall\": 0.92,\n        \"f1_score\": 0.925\n    }\n\n    Outputs = namedtuple(\"Outputs\", [\"model_path\", \"metrics\"])\n    return Outputs(model_path, metrics)\n\n"
+          ],
+          "image": "python:3.11-slim"
+        }
+      }
+    }
+  },
+  "pipelineInfo": {
+    "description": "ML Pipeline for Thrasio data modernization project",
+    "name": "thrasio-ml-pipeline"
+  },
+  "root": {
+    "dag": {
+      "outputs": {
+        "parameters": {
+          "deploy_approved": {
+            "valueFromParameter": {
+              "outputParameterKey": "deploy_decision",
+              "producerSubtask": "model-evaluation-component"
+            }
+          },
+          "final_metrics": {
+            "valueFromParameter": {
+              "outputParameterKey": "evaluation_metrics",
+              "producerSubtask": "model-evaluation-component"
+            }
+          },
+          "model_path": {
+            "valueFromParameter": {
+              "outputParameterKey": "model_path",
+              "producerSubtask": "model-training-component"
+            }
+          }
+        }
+      },
+      "tasks": {
+        "data-preprocessing-component": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-data-preprocessing-component"
+          },
+          "inputs": {
+            "parameters": {
+              "input_dataset": {
+                "componentInputParameter": "input_dataset"
+              },
+              "project_id": {
+                "componentInputParameter": "project_id"
+              },
+              "region": {
+                "componentInputParameter": "region"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "data-preprocessing-component"
+          }
+        },
+        "model-evaluation-component": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-model-evaluation-component"
+          },
+          "dependentTasks": [
+            "data-preprocessing-component",
+            "model-training-component"
+          ],
+          "inputs": {
+            "parameters": {
+              "model_path": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "model_path",
+                  "producerTask": "model-training-component"
+                }
+              },
+              "test_data_path": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "processed_data_path",
+                  "producerTask": "data-preprocessing-component"
+                }
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "model-evaluation-component"
+          }
+        },
+        "model-training-component": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-model-training-component"
+          },
+          "dependentTasks": [
+            "data-preprocessing-component"
+          ],
+          "inputs": {
+            "parameters": {
+              "model_config": {
+                "runtimeValue": {
+                  "constant": {
+                    "algorithm": "random_forest",
+                    "version": "{{$.inputs.parameters['pipelinechannel--model_version']}}"
+                  }
+                }
+              },
+              "pipelinechannel--model_version": {
+                "componentInputParameter": "model_version"
+              },
+              "processed_data_path": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "processed_data_path",
+                  "producerTask": "data-preprocessing-component"
+                }
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "model-training-component"
+          }
+        }
+      }
+    },
+    "inputDefinitions": {
+      "parameters": {
+        "input_dataset": {
+          "defaultValue": "thrasio_raw_data",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "model_version": {
+          "defaultValue": "v1",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "project_id": {
+          "parameterType": "STRING"
+        },
+        "region": {
+          "parameterType": "STRING"
+        }
+      }
+    },
+    "outputDefinitions": {
+      "parameters": {
+        "deploy_approved": {
+          "parameterType": "BOOLEAN"
+        },
+        "final_metrics": {
+          "parameterType": "STRUCT"
+        },
+        "model_path": {
+          "parameterType": "STRING"
+        }
+      }
+    }
+  },
+  "schemaVersion": "2.1.0",
+  "sdkVersion": "kfp-2.13.0"
+}

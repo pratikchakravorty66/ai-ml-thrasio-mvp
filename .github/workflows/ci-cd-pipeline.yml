@@ -1,0 +1,153 @@
+name: CI/CD Pipeline Deployment
+
+on:
+  push:
+    branches: [ main, dev ]
+    paths:
+      - 'app/**'
+      - 'pyproject.toml'
+      - '.github/workflows/ci-cd-pipeline.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'app/**'
+      - 'pyproject.toml'
+
+env:
+  PYTHON_VERSION: '3.13'
+  POETRY_VERSION: '1.8.0'
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: ${{ env.POETRY_VERSION }}
+        
+    - name: Configure Poetry
+      run: |
+        poetry config virtualenvs.create true
+        poetry config virtualenvs.in-project true
+        
+    - name: Cache Poetry dependencies
+      uses: actions/cache@v3
+      with:
+        path: .venv
+        key: poetry-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+        
+    - name: Install dependencies
+      run: |
+        poetry install --with dev
+        
+    - name: Run linting with ruff
+      run: |
+        poetry run ruff check .
+        poetry run ruff format . --check
+        
+    - name: Run tests
+      run: |
+        poetry run pytest --cov --cov-report=xml
+        
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      if: success()
+      with:
+        file: ./coverage.xml
+
+  compile-pipeline:
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: ${{ env.POETRY_VERSION }}
+        
+    - name: Install dependencies
+      run: |
+        poetry install
+        poetry run pip install kfp google-cloud-aiplatform
+        
+    - name: Compile Vertex AI Pipeline
+      run: |
+        poetry run python app/pipeline.py
+        
+    - name: Upload pipeline artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: pipeline-definition
+        path: pipeline.json
+        retention-days: 30
+
+  deploy-pipeline:
+    runs-on: ubuntu-latest
+    needs: compile-pipeline
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download pipeline artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: pipeline-definition
+        
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+        
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: ${{ env.POETRY_VERSION }}
+        
+    - name: Install dependencies
+      run: |
+        poetry install
+        poetry run pip install kfp google-cloud-aiplatform
+        
+    - name: Deploy to Vertex AI Pipelines
+      run: |
+        poetry run python -c "
+        from app.pipeline import deploy_pipeline
+        import os
+        deploy_pipeline(
+            project_id='${{ secrets.GCP_PROJECT_ID }}',
+            region='${{ secrets.GCP_REGION }}',
+            pipeline_definition_path='pipeline.json'
+        )
+        "
+      env:
+        GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}

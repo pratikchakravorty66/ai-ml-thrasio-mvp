@@ -27,6 +27,7 @@ jsonref = "^1.1.0"
 flask = "^3.1.0"
 requests = "^2.32.3"
 opencv-python = "^4.11.0.86"
+kfp = "^2.8.0"
 
 [tool.poetry.group.test.dependencies]
 pytest = "^7.3.1"
