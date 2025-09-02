@@ -4,10 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-# Add the project root to Python path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from app.pipeline import compile_pipeline
+from google.cloud import aiplatform
 
 
 def main():
@@ -24,6 +21,9 @@ def main():
     print(f"Deploying pipeline to project: {project_id}, region: {region}")
 
     try:
+        # Import compile_pipeline function
+        from app.pipeline import compile_pipeline
+
         # Compile pipeline
         pipeline_path = "pipeline.json"
         compile_pipeline(pipeline_path)
@@ -34,7 +34,6 @@ def main():
             sys.exit(1)
 
         # Initialize Vertex AI with authenticated session
-        from google.cloud import aiplatform
         aiplatform.init(project=project_id, location=region)
 
         # Deploy to Vertex AI using authenticated session
@@ -44,10 +43,10 @@ def main():
             parameter_values={
                 "project_id": project_id,
                 "region": region,
-                "input_dataset": "thrasio_production_data"
-            }
+                "input_dataset": "thrasio_production_data",
+            },
         )
-        
+
         job.submit()
         print(f"✅ Pipeline deployed successfully: {job.resource_name}")
 
