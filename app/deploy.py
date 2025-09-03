@@ -65,6 +65,7 @@ def main():
                 "region": region,
                 "input_dataset": "thrasio_production_data",
             },
+            pipeline_root=staging_bucket,
         )
 
         job.submit()
