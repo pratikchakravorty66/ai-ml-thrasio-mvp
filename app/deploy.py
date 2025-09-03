@@ -50,8 +50,11 @@ def main():
             print(f"Error: Pipeline file {pipeline_path} not found")
             sys.exit(1)
 
-        # Initialize Vertex AI with authenticated session
-        aiplatform.init(project=project_id, location=region)
+        # Initialize Vertex AI with authenticated session and staging bucket
+        staging_bucket = f"gs://{project_id}-vertex-pipelines-pratik-20250903"
+        aiplatform.init(
+            project=project_id, location=region, staging_bucket=staging_bucket
+        )
 
         # Deploy to Vertex AI using authenticated session
         job = aiplatform.PipelineJob(
