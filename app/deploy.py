@@ -57,7 +57,9 @@ def main():
         )
 
         # Deploy to Vertex AI using authenticated session
-        service_account = "tesseract-local-test@ai-ml-team-sandbox.iam.gserviceaccount.com"
+        service_account = (
+            "tesseract-local-test@ai-ml-team-sandbox.iam.gserviceaccount.com"
+        )
         job = aiplatform.PipelineJob(
             display_name="thrasio-ml-pipeline",
             template_path=pipeline_path,
