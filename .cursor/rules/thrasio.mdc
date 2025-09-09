@@ -1,3 +1,7 @@
+---
+description: thrasio_internal
+alwaysApply: false
+---
 # Cursor Rules for tesseract-backend-ml
 # Software Engineering and AI Project Rules
 
@@ -39,11 +43,5 @@ Regularly revisit and refine code structure to maintain clarity, simplicity, and
 - Activate the virtual environment before running commands such as tests
 - Manual command execution preferred - provide commands to copy and paste rather than executing automatically
 
-## Project Focus
-
-This is a Tesseract backend ML project with focus on:
-- PDF processing and OCR
-- Label Studio integration
-- Google Cloud Storage integration
-- Document type processing (bank statements, pay stubs, allotment proofs, split direct deposit proofs)
-- Asynchronous processing with proper error handling and retries 
+## Project Overview
+This is an AI/ML MVP for Thrasio's data modernization project, built with Python and Poetry. The project integrates with Google Cloud Platform (specifically Vertex AI) and aims to consolidate legacy systems into a scalable BigQuery-based platform with AI/ML capabilities and Looker reporting.

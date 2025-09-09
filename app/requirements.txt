@@ -1,0 +1,8 @@
+functions-framework==3.*
+google-cloud-aiplatform==1.71.1
+google-cloud-bigquery
+google-cloud-storage
+pandas
+numpy
+jinja2
+sendgrid==6.*

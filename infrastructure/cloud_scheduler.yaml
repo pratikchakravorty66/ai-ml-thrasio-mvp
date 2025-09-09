@@ -1,0 +1,41 @@
+# Cloud Scheduler configuration for weekly ML reports
+# Deploy using: gcloud scheduler jobs create http weekly-ml-report --schedule="0 9 * * MON" --uri=FUNCTION_URL --http-method=GET
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: weekly-ml-report-config
+data:
+  # Schedule: Every Monday at 9 AM UTC (0 9 * * MON)
+  schedule: "0 9 * * MON"
+  timezone: "UTC"
+  description: "Weekly ML performance report generation for Thrasio"
+  
+  # Cloud Function Configuration
+  function_name: "weekly-ml-report-trigger"
+  function_region: "us-central1"
+  function_runtime: "python311"
+  function_memory: "1GB"
+  function_timeout: "540s"
+  
+  # Environment Variables for Cloud Function
+  env_vars: |
+    GCP_PROJECT_ID: ${PROJECT_ID}
+    GCP_REGION: us-central1
+    PIPELINE_TEMPLATE_PATH: gs://${PROJECT_ID}-ml-pipelines/reporting_pipeline.json
+    REPORT_BUCKET: ${PROJECT_ID}-ml-reports
+    STAGING_BUCKET: gs://${PROJECT_ID}-vertex-pipelines-staging
+    EMAIL_RECIPIENTS: team@thrasio.com,ml-team@thrasio.com
+    SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+
+---
+# Pub/Sub topic for alternative triggering method
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pubsub-config
+data:
+  topic_name: "weekly-ml-reports"
+  subscription_name: "weekly-ml-reports-sub"
+  # Alternative schedule for Pub/Sub trigger
+  pubsub_schedule: "0 9 * * MON"

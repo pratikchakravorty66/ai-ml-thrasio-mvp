@@ -1,5 +1,43 @@
 {
   "components": {
+    "comp-data-ingestion-component": {
+      "executorLabel": "exec-data-ingestion-component",
+      "inputDefinitions": {
+        "parameters": {
+          "bq_table_name": {
+            "parameterType": "STRING"
+          },
+          "project_id": {
+            "parameterType": "STRING"
+          },
+          "region": {
+            "defaultValue": "us-central1",
+            "isOptional": true,
+            "parameterType": "STRING"
+          },
+          "validation_config": {
+            "isOptional": true,
+            "parameterType": "STRUCT"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "ingested_data_path": {
+            "parameterType": "STRING"
+          },
+          "row_count": {
+            "parameterType": "NUMBER_INTEGER"
+          },
+          "schema_info": {
+            "parameterType": "STRUCT"
+          },
+          "validation_results": {
+            "parameterType": "STRUCT"
+          }
+        }
+      }
+    },
     "comp-data-preprocessing-component": {
       "executorLabel": "exec-data-preprocessing-component",
       "inputDefinitions": {
@@ -7,21 +45,40 @@
           "input_dataset": {
             "parameterType": "STRING"
           },
+          "preprocessing_config": {
+            "isOptional": true,
+            "parameterType": "STRUCT"
+          },
           "project_id": {
             "parameterType": "STRING"
           },
           "region": {
+            "parameterType": "STRING"
+          },
+          "target_column": {
+            "isOptional": true,
+            "parameterType": "STRING"
+          },
+          "timestamp_column": {
+            "defaultValue": "timestamp",
+            "isOptional": true,
             "parameterType": "STRING"
           }
         }
       },
       "outputDefinitions": {
         "parameters": {
+          "feature_names": {
+            "parameterType": "LIST"
+          },
           "metadata": {
             "parameterType": "STRUCT"
           },
           "processed_data_path": {
             "parameterType": "STRING"
+          },
+          "scaler_info": {
+            "parameterType": "STRUCT"
           }
         }
       }
@@ -75,6 +132,26 @@
   },
   "deploymentSpec": {
     "executors": {
+      "exec-data-ingestion-component": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "data_ingestion_component"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-bigquery' 'pandas' 'numpy' 'pydantic' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef data_ingestion_component(\n    project_id: str,\n    bq_table_name: str,\n    region: str = \"us-central1\",\n    validation_config: dict = None,\n) -> NamedTuple(\n    \"Outputs\",\n    [\n        (\"ingested_data_path\", str),\n        (\"validation_results\", dict),\n        (\"row_count\", int),\n        (\"schema_info\", dict),\n    ],\n):\n    \"\"\"Ingest data from BigQuery and perform basic validation checks.\"\"\"\n    from collections import namedtuple\n    from typing import Any, Dict\n\n    import pandas as pd\n    from google.cloud import bigquery\n\n    def validate_dataframe(df: pd.DataFrame, config: Dict[str, Any]) -> Dict[str, Any]:\n        \"\"\"Perform basic data validation checks.\"\"\"\n        validation_results = {\n            \"passed\": True,\n            \"checks\": {},\n            \"errors\": [],\n            \"warnings\": [],\n        }\n\n        # Basic checks\n        validation_results[\"checks\"][\"row_count\"] = len(df)\n        validation_results[\"checks\"][\"column_count\"] = len(df.columns)\n        validation_results[\"checks\"][\"null_counts\"] = df.isnull().sum().to_dict()\n        validation_results[\"checks\"][\"data_types\"] = df.dtypes.astype(str).to_dict()\n\n        # Minimum row count validation\n        min_rows = config.get(\"min_rows\", 1) if config else 1\n        if len(df) < min_rows:\n            validation_results[\"passed\"] = False\n            validation_results[\"errors\"].append(\n                f\"Row count {len(df)} is below minimum threshold {min_rows}\"\n            )\n\n        # Required columns validation\n        required_cols = config.get(\"required_columns\", []) if config else []\n        missing_cols = set(required_cols) - set(df.columns)\n        if missing_cols:\n            validation_results[\"passed\"] = False\n            validation_results[\"errors\"].append(\n                f\"Missing required columns: {list(missing_cols)}\"\n            )\n\n        # Null value thresholds\n        null_thresholds = config.get(\"null_thresholds\", {}) if config else {}\n        for col, threshold in null_thresholds.items():\n            if col in df.columns:\n                null_pct = (df[col].isnull().sum() / len(df)) * 100\n                if null_pct > threshold:\n                    validation_results[\"warnings\"].append(\n                        f\"Column {col} has {null_pct:.1f}% null values, \"\n                        f\"exceeding threshold {threshold}%\"\n                    )\n\n        return validation_results\n\n    try:\n        print(f\"Starting data ingestion from BigQuery table: {bq_table_name}\")\n\n        # Initialize BigQuery client\n        client = bigquery.Client(project=project_id)\n\n        # Construct query with table name parameter\n        query = f\"\"\"\n        SELECT *\n        FROM `{bq_table_name}`\n        LIMIT 10000\n        \"\"\"\n\n        print(f\"Executing query: {query}\")\n\n        # Execute query and load to DataFrame\n        query_job = client.query(query)\n        df = query_job.to_dataframe()\n\n        print(f\"Successfully loaded {len(df)} rows from BigQuery\")\n\n        # Perform data validation\n        validation_config_dict = validation_config or {}\n        validation_results = validate_dataframe(df, validation_config_dict)\n\n        # Store data to GCS (simulated path for now)\n        table_name_clean = bq_table_name.replace(\".\", \"_\")\n        output_path = (\n            f\"gs://{project_id}-ml-data/ingested/{table_name_clean}/data.parquet\"\n        )\n\n        # In a real implementation, you would save to GCS here\n        print(f\"Data would be saved to: {output_path}\")\n\n        # Extract schema information\n        schema_info = {\n            \"columns\": list(df.columns),\n            \"dtypes\": df.dtypes.astype(str).to_dict(),\n            \"shape\": df.shape,\n            \"memory_usage\": df.memory_usage(deep=True).sum(),\n        }\n\n        print(\"Data ingestion and validation completed successfully\")\n        print(f\"Validation passed: {validation_results['passed']}\")\n\n        if validation_results[\"errors\"]:\n            print(f\"Validation errors: {validation_results['errors']}\")\n        if validation_results[\"warnings\"]:\n            print(f\"Validation warnings: {validation_results['warnings']}\")\n\n        Outputs = namedtuple(\n            \"Outputs\",\n            [\"ingested_data_path\", \"validation_results\", \"row_count\", \"schema_info\"],\n        )\n        return Outputs(output_path, validation_results, len(df), schema_info)\n\n    except Exception as e:\n        print(f\"Error during data ingestion: {str(e)}\")\n        error_results = {\n            \"passed\": False,\n            \"checks\": {},\n            \"errors\": [f\"Data ingestion failed: {str(e)}\"],\n            \"warnings\": [],\n        }\n\n        Outputs = namedtuple(\n            \"Outputs\",\n            [\"ingested_data_path\", \"validation_results\", \"row_count\", \"schema_info\"],\n        )\n        return Outputs(\"\", error_results, 0, {})\n\n"
+          ],
+          "image": "python:3.11-slim"
+        }
+      },
       "exec-data-preprocessing-component": {
         "container": {
           "args": [
@@ -86,11 +163,11 @@
           "command": [
             "sh",
             "-c",
-            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform' 'pandas' 'numpy' && \"$0\" \"$@\"\n",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy' 'scikit-learn' 'google-cloud-storage' 'pyarrow' && \"$0\" \"$@\"\n",
             "sh",
             "-ec",
             "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
-            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef data_preprocessing_component(\n    project_id: str,\n    region: str,\n    input_dataset: str\n) -> NamedTuple(\"Outputs\", [(\"processed_data_path\", str), (\"metadata\", dict)]):\n    \"\"\"Preprocess data for ML training.\"\"\"\n    from collections import namedtuple\n\n    # Placeholder preprocessing logic\n    print(f\"Processing dataset: {input_dataset}\")\n\n    # In a real implementation, this would:\n    # - Load data from BigQuery or GCS\n    # - Clean and transform data\n    # - Store processed data back to GCS\n\n    processed_path = f\"gs://{project_id}-ml-data/processed/data.parquet\"\n    metadata = {\n        \"rows_processed\": 1000,\n        \"features_created\": 50,\n        \"processing_timestamp\": \"2024-01-01T00:00:00Z\"\n    }\n\n    Outputs = namedtuple(\"Outputs\", [\"processed_data_path\", \"metadata\"])\n    return Outputs(processed_path, metadata)\n\n"
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef data_preprocessing_component(\n    project_id: str,\n    region: str, \n    input_dataset: str,\n    preprocessing_config: dict = None,\n    timestamp_column: str = \"timestamp\",\n    target_column: str = None,\n) -> NamedTuple(\n    \"Outputs\", \n    [\n        (\"processed_data_path\", str), \n        (\"metadata\", dict),\n        (\"feature_names\", list),\n        (\"scaler_info\", dict),\n    ]\n):\n    \"\"\"Time-series specific preprocessing component for ML training.\"\"\"\n    from collections import namedtuple\n    from datetime import datetime\n    from typing import Any, Dict, List\n\n    import numpy as np\n    import pandas as pd\n    from sklearn.preprocessing import StandardScaler, LabelEncoder, MinMaxScaler\n\n    def create_time_features(df: pd.DataFrame, timestamp_col: str) -> pd.DataFrame:\n        \"\"\"Create time-based features from timestamp column.\"\"\"\n        df = df.copy()\n\n        # Ensure timestamp column is datetime\n        df[timestamp_col] = pd.to_datetime(df[timestamp_col])\n\n        # Extract time components\n        df['year'] = df[timestamp_col].dt.year\n        df['month'] = df[timestamp_col].dt.month\n        df['day'] = df[timestamp_col].dt.day\n        df['hour'] = df[timestamp_col].dt.hour\n        df['minute'] = df[timestamp_col].dt.minute\n        df['day_of_week'] = df[timestamp_col].dt.dayofweek\n        df['day_of_year'] = df[timestamp_col].dt.dayofyear\n        df['week_of_year'] = df[timestamp_col].dt.isocalendar().week\n        df['quarter'] = df[timestamp_col].dt.quarter\n\n        # Cyclical features\n        df['month_sin'] = np.sin(2 * np.pi * df['month'] / 12)\n        df['month_cos'] = np.cos(2 * np.pi * df['month'] / 12)\n        df['day_sin'] = np.sin(2 * np.pi * df['day_of_week'] / 7)\n        df['day_cos'] = np.cos(2 * np.pi * df['day_of_week'] / 7)\n        df['hour_sin'] = np.sin(2 * np.pi * df['hour'] / 24)\n        df['hour_cos'] = np.cos(2 * np.pi * df['hour'] / 24)\n\n        print(f\"Created time features: year, month, day, hour, minute, day_of_week, day_of_year, week_of_year, quarter, cyclical features\")\n\n        return df\n\n    def create_lag_features(df: pd.DataFrame, target_col: str, lags: List[int]) -> pd.DataFrame:\n        \"\"\"Create lag features for time-series forecasting.\"\"\"\n        if target_col not in df.columns:\n            print(f\"Target column {target_col} not found, skipping lag features\")\n            return df\n\n        df = df.copy()\n\n        for lag in lags:\n            df[f'{target_col}_lag_{lag}'] = df[target_col].shift(lag)\n\n        print(f\"Created lag features for {target_col}: {[f'{target_col}_lag_{lag}' for lag in lags]}\")\n        return df\n\n    def create_rolling_features(df: pd.DataFrame, target_col: str, windows: List[int]) -> pd.DataFrame:\n        \"\"\"Create rolling window features.\"\"\"\n        if target_col not in df.columns:\n            print(f\"Target column {target_col} not found, skipping rolling features\")\n            return df\n\n        df = df.copy()\n\n        for window in windows:\n            df[f'{target_col}_rolling_mean_{window}'] = df[target_col].rolling(window=window).mean()\n            df[f'{target_col}_rolling_std_{window}'] = df[target_col].rolling(window=window).std()\n            df[f'{target_col}_rolling_min_{window}'] = df[target_col].rolling(window=window).min()\n            df[f'{target_col}_rolling_max_{window}'] = df[target_col].rolling(window=window).max()\n\n        print(f\"Created rolling features for {target_col} with windows: {windows}\")\n        return df\n\n    def encode_categorical_features(df: pd.DataFrame, categorical_cols: List[str]) -> tuple:\n        \"\"\"Encode categorical features using label encoding.\"\"\"\n        df = df.copy()\n        encoders = {}\n\n        for col in categorical_cols:\n            if col in df.columns:\n                le = LabelEncoder()\n                df[col] = le.fit_transform(df[col].astype(str))\n                encoders[col] = {\n                    'type': 'label_encoder',\n                    'classes': le.classes_.tolist()\n                }\n                print(f\"Encoded categorical column: {col}\")\n\n        return df, encoders\n\n    def scale_numerical_features(df: pd.DataFrame, numerical_cols: List[str], scaler_type: str = 'standard') -> tuple:\n        \"\"\"Scale numerical features.\"\"\"\n        df = df.copy()\n        scalers = {}\n\n        available_cols = [col for col in numerical_cols if col in df.columns]\n\n        if not available_cols:\n            print(\"No numerical columns found for scaling\")\n            return df, scalers\n\n        if scaler_type == 'standard':\n            scaler = StandardScaler()\n        elif scaler_type == 'minmax':\n            scaler = MinMaxScaler()\n        else:\n            print(f\"Unknown scaler type: {scaler_type}, using standard\")\n            scaler = StandardScaler()\n\n        df[available_cols] = scaler.fit_transform(df[available_cols])\n\n        scalers[scaler_type] = {\n            'columns': available_cols,\n            'mean': scaler.mean_.tolist() if hasattr(scaler, 'mean_') else None,\n            'scale': scaler.scale_.tolist() if hasattr(scaler, 'scale_') else None,\n            'data_min': scaler.data_min_.tolist() if hasattr(scaler, 'data_min_') else None,\n            'data_max': scaler.data_max_.tolist() if hasattr(scaler, 'data_max_') else None,\n        }\n\n        print(f\"Scaled {len(available_cols)} numerical columns using {scaler_type} scaler\")\n        return df, scalers\n\n    try:\n        print(f\"Starting preprocessing for dataset: {input_dataset}\")\n\n        # In a real implementation, load data from the ingestion component output\n        # For now, simulate loading data\n        print(\"Loading data from ingestion component...\")\n\n        # Create sample time-series data for demonstration\n        date_range = pd.date_range(start='2023-01-01', end='2024-01-01', freq='H')\n        sample_data = {\n            timestamp_column: date_range,\n            'value': np.random.randn(len(date_range)) * 100 + 1000,\n            'category': np.random.choice(['A', 'B', 'C'], len(date_range)),\n            'feature_1': np.random.randn(len(date_range)),\n            'feature_2': np.random.randn(len(date_range)) * 50,\n        }\n        df = pd.DataFrame(sample_data)\n\n        print(f\"Loaded {len(df)} rows for preprocessing\")\n\n        # Get preprocessing configuration\n        config = preprocessing_config or {}\n\n        # Time-series feature engineering\n        df = create_time_features(df, timestamp_column)\n\n        # Create lag features if target column specified\n        if target_column and target_column in df.columns:\n            lags = config.get('lags', [1, 7, 24])  # Default lags for hourly data\n            df = create_lag_features(df, target_column, lags)\n\n            # Create rolling features\n            windows = config.get('rolling_windows', [7, 24, 168])  # 7h, 24h, 7d for hourly data\n            df = create_rolling_features(df, target_column, windows)\n\n        # Handle categorical encoding\n        categorical_cols = config.get('categorical_columns', ['category'])\n        df, encoders = encode_categorical_features(df, categorical_cols)\n\n        # Handle numerical scaling\n        numerical_cols = config.get('numerical_columns', ['feature_1', 'feature_2', 'value'])\n        scaler_type = config.get('scaler_type', 'standard')\n        df, scalers = scale_numerical_features(df, numerical_cols, scaler_type)\n\n        # Remove rows with NaN values created by lag/rolling features\n        initial_rows = len(df)\n        df = df.dropna()\n        final_rows = len(df)\n        print(f\"Removed {initial_rows - final_rows} rows with NaN values after feature engineering\")\n\n        # Store processed data (simulated GCS path)\n        processed_path = f\"gs://{project_id}-ml-data/processed/timeseries_data.parquet\"\n        print(f\"Processed data would be saved to: {processed_path}\")\n\n        # Prepare metadata\n        feature_names = df.columns.tolist()\n        metadata = {\n            \"rows_processed\": len(df),\n            \"features_created\": len(feature_names),\n            \"original_features\": len(sample_data),\n            \"processing_timestamp\": datetime.now().isoformat(),\n            \"timestamp_column\": timestamp_column,\n            \"target_column\": target_column,\n            \"categorical_encoders\": encoders,\n            \"data_shape\": df.shape,\n            \"preprocessing_config\": config,\n        }\n\n        # Scaler information\n        scaler_info = {\n            \"scalers\": scalers,\n            \"scaler_type\": scaler_type,\n            \"scaled_columns\": scalers.get(scaler_type, {}).get('columns', []),\n        }\n\n        print(\"Time-series preprocessing completed successfully\")\n        print(f\"Final dataset shape: {df.shape}\")\n        print(f\"Feature names: {feature_names[:10]}{'...' if len(feature_names) > 10 else ''}\")\n\n        Outputs = namedtuple(\"Outputs\", [\"processed_data_path\", \"metadata\", \"feature_names\", \"scaler_info\"])\n        return Outputs(processed_path, metadata, feature_names, scaler_info)\n\n    except Exception as e:\n        print(f\"Error during preprocessing: {str(e)}\")\n\n        error_metadata = {\n            \"rows_processed\": 0,\n            \"features_created\": 0,\n            \"processing_timestamp\": datetime.now().isoformat(),\n            \"error\": str(e),\n        }\n\n        Outputs = namedtuple(\"Outputs\", [\"processed_data_path\", \"metadata\", \"feature_names\", \"scaler_info\"])\n        return Outputs(\"\", error_metadata, [], {})\n\n"
           ],
           "image": "python:3.11-slim"
         }
@@ -110,7 +187,7 @@
             "sh",
             "-ec",
             "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
-            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef model_evaluation_component(\n    model_path: str,\n    test_data_path: str\n) -> NamedTuple(\"Outputs\", [(\"evaluation_metrics\", dict), (\"deploy_decision\", bool)]):\n    \"\"\"Evaluate trained model and decide on deployment.\"\"\"\n    from collections import namedtuple\n\n    print(f\"Evaluating model: {model_path}\")\n    print(f\"Test data: {test_data_path}\")\n\n    # In a real implementation, this would:\n    # - Load the trained model\n    # - Run evaluation on test dataset\n    # - Compare against baseline metrics\n    # - Make deployment decision\n\n    evaluation_metrics = {\n        \"test_accuracy\": 0.94,\n        \"test_precision\": 0.92,\n        \"test_recall\": 0.91,\n        \"baseline_comparison\": \"improved\"\n    }\n\n    # Deploy if accuracy > 0.9\n    deploy_decision = evaluation_metrics[\"test_accuracy\"] > 0.9\n\n    Outputs = namedtuple(\"Outputs\", [\"evaluation_metrics\", \"deploy_decision\"])\n    return Outputs(evaluation_metrics, deploy_decision)\n\n"
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef model_evaluation_component(model_path: str, test_data_path: str) -> NamedTuple(\n    \"Outputs\", [(\"evaluation_metrics\", dict), (\"deploy_decision\", bool)]\n):\n    \"\"\"Evaluate trained model and decide on deployment.\"\"\"\n    from collections import namedtuple\n\n    print(f\"Evaluating model: {model_path}\")\n    print(f\"Test data: {test_data_path}\")\n\n    # In a real implementation, this would:\n    # - Load the trained model\n    # - Run evaluation on test dataset\n    # - Compare against baseline metrics\n    # - Make deployment decision\n\n    evaluation_metrics = {\n        \"test_accuracy\": 0.94,\n        \"test_precision\": 0.92,\n        \"test_recall\": 0.91,\n        \"baseline_comparison\": \"improved\",\n    }\n\n    # Deploy if accuracy > 0.9\n    deploy_decision = evaluation_metrics[\"test_accuracy\"] > 0.9\n\n    Outputs = namedtuple(\"Outputs\", [\"evaluation_metrics\", \"deploy_decision\"])\n    return Outputs(evaluation_metrics, deploy_decision)\n\n"
           ],
           "image": "python:3.11-slim"
         }
@@ -130,7 +207,7 @@
             "sh",
             "-ec",
             "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
-            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef model_training_component(\n    processed_data_path: str,\n    model_config: dict\n) -> NamedTuple(\"Outputs\", [(\"model_path\", str), (\"metrics\", dict)]):\n    \"\"\"Train ML model.\"\"\"\n    from collections import namedtuple\n\n    print(f\"Training model with data from: {processed_data_path}\")\n    print(f\"Model config: {model_config}\")\n\n    # In a real implementation, this would:\n    # - Load processed data\n    # - Train the model\n    # - Save model artifacts to GCS\n    # - Return model metrics\n\n    model_path = f\"gs://models/trained_model_{model_config.get('version', 'v1')}\"\n    metrics = {\n        \"accuracy\": 0.95,\n        \"precision\": 0.93,\n        \"recall\": 0.92,\n        \"f1_score\": 0.925\n    }\n\n    Outputs = namedtuple(\"Outputs\", [\"model_path\", \"metrics\"])\n    return Outputs(model_path, metrics)\n\n"
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef model_training_component(\n    processed_data_path: str, model_config: dict\n) -> NamedTuple(\"Outputs\", [(\"model_path\", str), (\"metrics\", dict)]):\n    \"\"\"Train ML model.\"\"\"\n    from collections import namedtuple\n\n    print(f\"Training model with data from: {processed_data_path}\")\n    print(f\"Model config: {model_config}\")\n\n    # In a real implementation, this would:\n    # - Load processed data\n    # - Train the model\n    # - Save model artifacts to GCS\n    # - Return model metrics\n\n    model_path = f\"gs://models/trained_model_{model_config.get('version', 'v1')}\"\n    metrics = {\"accuracy\": 0.95, \"precision\": 0.93, \"recall\": 0.92, \"f1_score\": 0.925}\n\n    Outputs = namedtuple(\"Outputs\", [\"model_path\", \"metrics\"])\n    return Outputs(model_path, metrics)\n\n"
           ],
           "image": "python:3.11-slim"
         }
@@ -157,15 +234,54 @@
               "producerSubtask": "model-evaluation-component"
             }
           },
+          "ingestion_results": {
+            "valueFromParameter": {
+              "outputParameterKey": "validation_results",
+              "producerSubtask": "data-ingestion-component"
+            }
+          },
           "model_path": {
             "valueFromParameter": {
               "outputParameterKey": "model_path",
               "producerSubtask": "model-training-component"
             }
+          },
+          "preprocessing_results": {
+            "valueFromParameter": {
+              "outputParameterKey": "metadata",
+              "producerSubtask": "data-preprocessing-component"
+            }
           }
         }
       },
       "tasks": {
+        "data-ingestion-component": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-data-ingestion-component"
+          },
+          "inputs": {
+            "parameters": {
+              "bq_table_name": {
+                "componentInputParameter": "bq_table_name"
+              },
+              "project_id": {
+                "componentInputParameter": "project_id"
+              },
+              "region": {
+                "componentInputParameter": "region"
+              },
+              "validation_config": {
+                "componentInputParameter": "validation_config"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "data-ingestion-component"
+          }
+        },
         "data-preprocessing-component": {
           "cachingOptions": {
             "enableCache": true
@@ -173,16 +289,31 @@
           "componentRef": {
             "name": "comp-data-preprocessing-component"
           },
+          "dependentTasks": [
+            "data-ingestion-component"
+          ],
           "inputs": {
             "parameters": {
               "input_dataset": {
-                "componentInputParameter": "input_dataset"
+                "taskOutputParameter": {
+                  "outputParameterKey": "ingested_data_path",
+                  "producerTask": "data-ingestion-component"
+                }
+              },
+              "preprocessing_config": {
+                "componentInputParameter": "preprocessing_config"
               },
               "project_id": {
                 "componentInputParameter": "project_id"
               },
               "region": {
                 "componentInputParameter": "region"
+              },
+              "target_column": {
+                "componentInputParameter": "target_column"
+              },
+              "timestamp_column": {
+                "componentInputParameter": "timestamp_column"
               }
             }
           },
@@ -260,8 +391,8 @@
     },
     "inputDefinitions": {
       "parameters": {
-        "input_dataset": {
-          "defaultValue": "thrasio_raw_data",
+        "bq_table_name": {
+          "defaultValue": "project.dataset.thrasio_raw_data",
           "isOptional": true,
           "parameterType": "STRING"
         },
@@ -270,11 +401,29 @@
           "isOptional": true,
           "parameterType": "STRING"
         },
+        "preprocessing_config": {
+          "isOptional": true,
+          "parameterType": "STRUCT"
+        },
         "project_id": {
           "parameterType": "STRING"
         },
         "region": {
           "parameterType": "STRING"
+        },
+        "target_column": {
+          "defaultValue": "value",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "timestamp_column": {
+          "defaultValue": "timestamp",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "validation_config": {
+          "isOptional": true,
+          "parameterType": "STRUCT"
         }
       }
     },
@@ -286,8 +435,14 @@
         "final_metrics": {
           "parameterType": "STRUCT"
         },
+        "ingestion_results": {
+          "parameterType": "STRUCT"
+        },
         "model_path": {
           "parameterType": "STRING"
+        },
+        "preprocessing_results": {
+          "parameterType": "STRUCT"
         }
       }
     }

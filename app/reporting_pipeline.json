@@ -1,0 +1,188 @@
+{
+  "components": {
+    "comp-weekly-report-generation-component": {
+      "executorLabel": "exec-weekly-report-generation-component",
+      "inputDefinitions": {
+        "parameters": {
+          "email_recipients": {
+            "parameterType": "LIST"
+          },
+          "project_id": {
+            "parameterType": "STRING"
+          },
+          "region": {
+            "parameterType": "STRING"
+          },
+          "report_bucket": {
+            "parameterType": "STRING"
+          },
+          "report_config": {
+            "isOptional": true,
+            "parameterType": "STRUCT"
+          },
+          "sendgrid_api_key": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "email_status": {
+            "parameterType": "STRING"
+          },
+          "metrics_summary": {
+            "parameterType": "STRUCT"
+          },
+          "report_path": {
+            "parameterType": "STRING"
+          },
+          "status": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    }
+  },
+  "deploymentSpec": {
+    "executors": {
+      "exec-weekly-report-generation-component": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "weekly_report_generation_component"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform' 'google-cloud-bigquery' 'google-cloud-storage' 'pandas' 'numpy' 'jinja2' 'sendgrid' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef weekly_report_generation_component(\n    project_id: str,\n    region: str,\n    report_bucket: str,\n    email_recipients: List[str],\n    sendgrid_api_key: str,\n    report_config: Dict[str, Any] = None,\n) -> NamedTuple(\n    \"Outputs\", \n    [\n        (\"report_path\", str),\n        (\"metrics_summary\", dict),\n        (\"status\", str),\n        (\"email_status\", str),\n    ]\n):\n    \"\"\"Generate weekly ML pipeline performance report.\"\"\"\n    import json\n    from collections import namedtuple\n    from datetime import datetime, timedelta\n    from typing import Dict, List\n\n    import pandas as pd\n    from google.cloud import aiplatform, bigquery, storage\n    from jinja2 import Template\n\n    def get_pipeline_metrics(project_id: str, region: str, days_back: int = 7) -> Dict:\n        \"\"\"Retrieve pipeline execution metrics from the last week.\"\"\"\n        try:\n            aiplatform.init(project=project_id, location=region)\n\n            # Get pipeline jobs from last week\n            end_time = datetime.now()\n            start_time = end_time - timedelta(days=days_back)\n\n            jobs = aiplatform.PipelineJob.list(\n                filter=f'create_time>=\"{start_time.isoformat()}\"',\n                order_by='create_time desc'\n            )\n\n            pipeline_metrics = {\n                \"total_runs\": len(jobs),\n                \"successful_runs\": 0,\n                \"failed_runs\": 0,\n                \"running_jobs\": 0,\n                \"avg_duration_minutes\": 0,\n                \"jobs_summary\": []\n            }\n\n            total_duration = 0\n            completed_jobs = 0\n\n            for job in jobs:\n                job_info = {\n                    \"display_name\": job.display_name,\n                    \"state\": str(job.state),\n                    \"create_time\": job.create_time.isoformat() if job.create_time else None,\n                    \"end_time\": job.end_time.isoformat() if job.end_time else None,\n                }\n\n                if job.state == aiplatform.PipelineJob.JobState.JOB_STATE_SUCCEEDED:\n                    pipeline_metrics[\"successful_runs\"] += 1\n                    if job.create_time and job.end_time:\n                        duration = (job.end_time - job.create_time).total_seconds() / 60\n                        total_duration += duration\n                        completed_jobs += 1\n                        job_info[\"duration_minutes\"] = round(duration, 2)\n                elif job.state == aiplatform.PipelineJob.JobState.JOB_STATE_FAILED:\n                    pipeline_metrics[\"failed_runs\"] += 1\n                elif job.state == aiplatform.PipelineJob.JobState.JOB_STATE_RUNNING:\n                    pipeline_metrics[\"running_jobs\"] += 1\n\n                pipeline_metrics[\"jobs_summary\"].append(job_info)\n\n            if completed_jobs > 0:\n                pipeline_metrics[\"avg_duration_minutes\"] = round(total_duration / completed_jobs, 2)\n\n            return pipeline_metrics\n\n        except Exception as e:\n            print(f\"Error retrieving pipeline metrics: {str(e)}\")\n            return {\n                \"total_runs\": 0,\n                \"successful_runs\": 0,\n                \"failed_runs\": 0,\n                \"error\": str(e)\n            }\n\n    def get_model_metrics(project_id: str, region: str) -> Dict:\n        \"\"\"Retrieve model performance metrics.\"\"\"\n        try:\n            aiplatform.init(project=project_id, location=region)\n\n            # Get models\n            models = aiplatform.Model.list()\n\n            model_metrics = {\n                \"total_models\": len(models),\n                \"models_summary\": []\n            }\n\n            for model in models[:5]:  # Limit to 5 most recent models\n                model_info = {\n                    \"display_name\": model.display_name,\n                    \"create_time\": model.create_time.isoformat() if model.create_time else None,\n                    \"model_id\": model.name.split(\"/\")[-1] if model.name else None,\n                    \"labels\": dict(model.labels) if model.labels else {}\n                }\n                model_metrics[\"models_summary\"].append(model_info)\n\n            return model_metrics\n\n        except Exception as e:\n            print(f\"Error retrieving model metrics: {str(e)}\")\n            return {\"total_models\": 0, \"error\": str(e)}\n\n    def get_data_quality_metrics(project_id: str) -> Dict:\n        \"\"\"Retrieve data quality metrics from BigQuery.\"\"\"\n        try:\n            client = bigquery.Client(project=project_id)\n\n            # Sample query to get data statistics\n            query = f\"\"\"\n            SELECT \n                COUNT(*) as total_rows,\n                COUNT(DISTINCT DATE(EXTRACT(DATE FROM CURRENT_TIMESTAMP()))) as days_with_data,\n                AVG(CASE WHEN col IS NOT NULL THEN 1 ELSE 0 END) * 100 as avg_completeness\n            FROM (\n                SELECT 1 as col\n                LIMIT 1000\n            )\n            \"\"\"\n\n            # Execute query\n            query_job = client.query(query)\n            results = list(query_job)\n\n            if results:\n                row = results[0]\n                return {\n                    \"total_rows_processed\": int(row.total_rows),\n                    \"data_completeness_pct\": round(float(row.avg_completeness), 2),\n                    \"status\": \"healthy\"\n                }\n            else:\n                return {\"status\": \"no_data\", \"total_rows_processed\": 0}\n\n        except Exception as e:\n            print(f\"Error retrieving data quality metrics: {str(e)}\")\n            return {\"status\": \"error\", \"error\": str(e)}\n\n    def generate_html_report(\n        pipeline_metrics: Dict,\n        model_metrics: Dict, \n        data_metrics: Dict,\n        report_date: str\n    ) -> str:\n        \"\"\"Generate HTML report from metrics.\"\"\"\n\n        html_template = \"\"\"\n        <!DOCTYPE html>\n        <html>\n        <head>\n            <title>Thrasio ML Weekly Report - {{ report_date }}</title>\n            <style>\n                body { font-family: Arial, sans-serif; margin: 20px; }\n                .header { background-color: #f4f4f4; padding: 20px; border-radius: 5px; }\n                .metric-card { background-color: #fff; border: 1px solid #ddd; \n                              border-radius: 5px; padding: 15px; margin: 10px 0; }\n                .success { color: #28a745; }\n                .error { color: #dc3545; }\n                .warning { color: #ffc107; }\n                table { width: 100%; border-collapse: collapse; margin: 10px 0; }\n                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }\n                th { background-color: #f4f4f4; }\n            </style>\n        </head>\n        <body>\n            <div class=\"header\">\n                <h1>\ud83d\ude80 Thrasio ML Weekly Report</h1>\n                <p><strong>Report Date:</strong> {{ report_date }}</p>\n                <p><strong>Reporting Period:</strong> Last 7 days</p>\n            </div>\n\n            <div class=\"metric-card\">\n                <h2>\ud83d\udcca Pipeline Performance</h2>\n                <table>\n                    <tr><th>Metric</th><th>Value</th></tr>\n                    <tr><td>Total Runs</td><td>{{ pipeline_metrics.total_runs }}</td></tr>\n                    <tr><td>Successful Runs</td><td class=\"success\">{{ pipeline_metrics.successful_runs }}</td></tr>\n                    <tr><td>Failed Runs</td><td class=\"error\">{{ pipeline_metrics.failed_runs }}</td></tr>\n                    <tr><td>Running Jobs</td><td class=\"warning\">{{ pipeline_metrics.running_jobs }}</td></tr>\n                    <tr><td>Average Duration (min)</td><td>{{ pipeline_metrics.avg_duration_minutes }}</td></tr>\n                </table>\n            </div>\n\n            <div class=\"metric-card\">\n                <h2>\ud83e\udd16 Model Status</h2>\n                <table>\n                    <tr><th>Metric</th><th>Value</th></tr>\n                    <tr><td>Total Models</td><td>{{ model_metrics.total_models }}</td></tr>\n                </table>\n\n                {% if model_metrics.models_summary %}\n                <h3>Recent Models:</h3>\n                <table>\n                    <tr><th>Model Name</th><th>Created</th><th>Model ID</th></tr>\n                    {% for model in model_metrics.models_summary %}\n                    <tr>\n                        <td>{{ model.display_name }}</td>\n                        <td>{{ model.create_time[:10] if model.create_time else 'N/A' }}</td>\n                        <td>{{ model.model_id if model.model_id else 'N/A' }}</td>\n                    </tr>\n                    {% endfor %}\n                </table>\n                {% endif %}\n            </div>\n\n            <div class=\"metric-card\">\n                <h2>\ud83d\udcc8 Data Quality</h2>\n                <table>\n                    <tr><th>Metric</th><th>Value</th></tr>\n                    <tr><td>Status</td><td class=\"{% if data_metrics.status == 'healthy' %}success{% else %}warning{% endif %}\">{{ data_metrics.status|title }}</td></tr>\n                    <tr><td>Rows Processed</td><td>{{ data_metrics.get('total_rows_processed', 'N/A') }}</td></tr>\n                    {% if data_metrics.get('data_completeness_pct') %}\n                    <tr><td>Data Completeness</td><td>{{ data_metrics.data_completeness_pct }}%</td></tr>\n                    {% endif %}\n                </table>\n            </div>\n\n            {% if pipeline_metrics.jobs_summary %}\n            <div class=\"metric-card\">\n                <h2>\ud83d\udccb Recent Pipeline Jobs</h2>\n                <table>\n                    <tr><th>Job Name</th><th>State</th><th>Created</th><th>Duration (min)</th></tr>\n                    {% for job in pipeline_metrics.jobs_summary[:5] %}\n                    <tr>\n                        <td>{{ job.display_name }}</td>\n                        <td class=\"{% if 'SUCCEEDED' in job.state %}success{% elif 'FAILED' in job.state %}error{% else %}warning{% endif %}\">\n                            {{ job.state.replace('JOB_STATE_', '') }}\n                        </td>\n                        <td>{{ job.create_time[:16] if job.create_time else 'N/A' }}</td>\n                        <td>{{ job.get('duration_minutes', 'N/A') }}</td>\n                    </tr>\n                    {% endfor %}\n                </table>\n            </div>\n            {% endif %}\n\n            <div class=\"metric-card\">\n                <p><em>Generated automatically by Thrasio ML Reporting System</em></p>\n                <p><em>For questions or issues, please contact the ML team.</em></p>\n            </div>\n        </body>\n        </html>\n        \"\"\"\n\n        template = Template(html_template)\n        return template.render(\n            report_date=report_date,\n            pipeline_metrics=pipeline_metrics,\n            model_metrics=model_metrics,\n            data_metrics=data_metrics\n        )\n\n    def send_email_report(\n        html_content: str,\n        recipients: List[str],\n        sendgrid_api_key: str,\n        subject: str\n    ) -> str:\n        \"\"\"Send email report using SendGrid.\"\"\"\n        try:\n            from sendgrid import SendGridAPIClient\n            from sendgrid.helpers.mail import Mail\n\n            sg = SendGridAPIClient(api_key=sendgrid_api_key)\n\n            message = Mail(\n                from_email='noreply@thrasio.com',  # Configure with your domain\n                to_emails=recipients,\n                subject=subject,\n                html_content=html_content\n            )\n\n            response = sg.send(message)\n            return f\"Email sent successfully. Status code: {response.status_code}\"\n\n        except Exception as e:\n            return f\"Failed to send email: {str(e)}\"\n\n    def save_report_to_gcs(\n        html_content: str,\n        bucket_name: str,\n        file_path: str\n    ) -> str:\n        \"\"\"Save report to Google Cloud Storage.\"\"\"\n        try:\n            client = storage.Client()\n            bucket = client.bucket(bucket_name)\n            blob = bucket.blob(file_path)\n\n            blob.upload_from_string(html_content, content_type='text/html')\n            return f\"gs://{bucket_name}/{file_path}\"\n\n        except Exception as e:\n            print(f\"Failed to save report to GCS: {str(e)}\")\n            return \"\"\n\n    try:\n        print(\"\ud83d\udd04 Starting weekly report generation...\")\n\n        # Generate timestamp\n        report_date = datetime.now().strftime(\"%Y-%m-%d\")\n\n        # Collect metrics\n        print(\"\ud83d\udcca Collecting pipeline metrics...\")\n        pipeline_metrics = get_pipeline_metrics(project_id, region)\n\n        print(\"\ud83e\udd16 Collecting model metrics...\")\n        model_metrics = get_model_metrics(project_id, region)\n\n        print(\"\ud83d\udcc8 Collecting data quality metrics...\")\n        data_metrics = get_data_quality_metrics(project_id)\n\n        # Generate report\n        print(\"\ud83d\udcdd Generating HTML report...\")\n        html_report = generate_html_report(\n            pipeline_metrics, model_metrics, data_metrics, report_date\n        )\n\n        # Save to GCS\n        report_filename = f\"weekly-reports/{report_date}/ml-report.html\"\n        print(f\"\ud83d\udcbe Saving report to GCS: {report_filename}\")\n        gcs_path = save_report_to_gcs(html_report, report_bucket, report_filename)\n\n        # Send email\n        email_status = \"not_configured\"\n        if sendgrid_api_key and email_recipients:\n            print(\"\ud83d\udce7 Sending email report...\")\n            subject = f\"Thrasio ML Weekly Report - {report_date}\"\n            email_status = send_email_report(html_report, email_recipients, sendgrid_api_key, subject)\n\n        # Prepare summary\n        metrics_summary = {\n            \"pipeline_runs\": pipeline_metrics.get(\"total_runs\", 0),\n            \"successful_runs\": pipeline_metrics.get(\"successful_runs\", 0),\n            \"total_models\": model_metrics.get(\"total_models\", 0),\n            \"data_status\": data_metrics.get(\"status\", \"unknown\"),\n            \"report_generated\": True,\n            \"generation_time\": datetime.now().isoformat()\n        }\n\n        print(\"\u2705 Weekly report generated successfully!\")\n\n        Outputs = namedtuple(\"Outputs\", [\"report_path\", \"metrics_summary\", \"status\", \"email_status\"])\n        return Outputs(gcs_path, metrics_summary, \"success\", email_status)\n\n    except Exception as e:\n        print(f\"\u274c Error generating weekly report: {str(e)}\")\n\n        error_summary = {\n            \"error\": str(e),\n            \"report_generated\": False,\n            \"generation_time\": datetime.now().isoformat()\n        }\n\n        Outputs = namedtuple(\"Outputs\", [\"report_path\", \"metrics_summary\", \"status\", \"email_status\"])\n        return Outputs(\"\", error_summary, \"failed\", \"failed\")\n\n"
+          ],
+          "image": "python:3.11-slim"
+        }
+      }
+    }
+  },
+  "pipelineInfo": {
+    "description": "Weekly ML reporting pipeline for Thrasio data modernization project",
+    "name": "thrasio-weekly-reporting-pipeline"
+  },
+  "root": {
+    "dag": {
+      "outputs": {
+        "parameters": {
+          "email_status": {
+            "valueFromParameter": {
+              "outputParameterKey": "email_status",
+              "producerSubtask": "weekly-report-generation-component"
+            }
+          },
+          "metrics_summary": {
+            "valueFromParameter": {
+              "outputParameterKey": "metrics_summary",
+              "producerSubtask": "weekly-report-generation-component"
+            }
+          },
+          "report_path": {
+            "valueFromParameter": {
+              "outputParameterKey": "report_path",
+              "producerSubtask": "weekly-report-generation-component"
+            }
+          },
+          "status": {
+            "valueFromParameter": {
+              "outputParameterKey": "status",
+              "producerSubtask": "weekly-report-generation-component"
+            }
+          }
+        }
+      },
+      "tasks": {
+        "weekly-report-generation-component": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-weekly-report-generation-component"
+          },
+          "inputs": {
+            "parameters": {
+              "email_recipients": {
+                "componentInputParameter": "email_recipients"
+              },
+              "project_id": {
+                "componentInputParameter": "project_id"
+              },
+              "region": {
+                "componentInputParameter": "region"
+              },
+              "report_bucket": {
+                "componentInputParameter": "report_bucket"
+              },
+              "report_config": {
+                "componentInputParameter": "report_config"
+              },
+              "sendgrid_api_key": {
+                "componentInputParameter": "sendgrid_api_key"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "weekly-report-generation-component"
+          }
+        }
+      }
+    },
+    "inputDefinitions": {
+      "parameters": {
+        "email_recipients": {
+          "isOptional": true,
+          "parameterType": "LIST"
+        },
+        "project_id": {
+          "parameterType": "STRING"
+        },
+        "region": {
+          "defaultValue": "us-central1",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "report_bucket": {
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "report_config": {
+          "isOptional": true,
+          "parameterType": "STRUCT"
+        },
+        "sendgrid_api_key": {
+          "defaultValue": "",
+          "isOptional": true,
+          "parameterType": "STRING"
+        }
+      }
+    },
+    "outputDefinitions": {
+      "parameters": {
+        "email_status": {
+          "parameterType": "STRING"
+        },
+        "metrics_summary": {
+          "parameterType": "STRUCT"
+        },
+        "report_path": {
+          "parameterType": "STRING"
+        },
+        "status": {
+          "parameterType": "STRING"
+        }
+      }
+    }
+  },
+  "schemaVersion": "2.1.0",
+  "sdkVersion": "kfp-2.13.0"
+}

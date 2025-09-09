@@ -54,10 +54,27 @@ poetry run streamlit run <streamlit_app.py>
 poetry run jupyter notebook
 ```
 
+### Pipeline Development
+```bash
+# Compile Vertex AI pipeline locally
+poetry run python app/pipeline.py
+
+# Deploy pipeline to Vertex AI
+export PYTHONPATH=$PYTHONPATH:.
+poetry run python app/deploy.py
+
+# Train AutoML model
+poetry run python app/automl_train.py
+```
+
 ## Project Architecture
-- **app/**: Main application code (currently minimal, appears to be early stage)
+- **app/**: Main application code including:
+  - `pipeline.py`: Vertex AI pipeline definition with KFP components
+  - `deploy.py`: Deployment utilities for CI/CD pipeline compilation and submission
+  - `automl_train.py`: AutoML model training and evaluation utilities
 - **experiments/**: ML experiments and research code (excluded from ruff linting)
 - **evaluations/**: ML model evaluation code (included in pytest path)
+- **.github/workflows/**: CI/CD pipeline configuration for automated deployment
 
 ## Environment Configuration
 Required environment variables (see .env.example):
